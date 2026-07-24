@@ -10,6 +10,7 @@ const { buildEnabledProviderGroups, buildProviderCatalog, canonicalProviderType 
 const {
   buildRouteProviderOptions,
   modelsForRouteProvider,
+  filterModelOptions,
   routeMemberForProvider,
   normalizeRouteMember,
   moveRouteMember,
@@ -1757,6 +1758,7 @@ function beginComboEdit(combo) {
     strategy: combo?.strategy || "fallback",
     pickerProviderId: null,
     pickerModelId: null,
+    pickerFreeOnly: false,
     members: (combo?.members || []).map((member) => ({
       ...(member.providerType
         ? { providerType: canonicalProviderType(member.providerType) }
@@ -1818,6 +1820,12 @@ function renderCombos(options = {}) {
   ) {
     editor.pickerModelId = null;
   }
+  const pickerSelectedModel = editor?.pickerModelId
+    ? pickerModels.find((model) => model.upstreamModel === editor.pickerModelId)
+    : null;
+  const pickerSelectedModelLabel = pickerSelectedModel
+    ? pickerSelectedModel.name || pickerSelectedModel.upstreamModel
+    : "";
 
   const listMarkup = `
     <div class="route-card-grid">
@@ -1884,7 +1892,7 @@ function renderCombos(options = {}) {
       </div>
       <div class="route-member-picker">
         <label class="route-picker-field" for="c-add-provider"><span class="label">Provider</span><select class="select" id="c-add-provider"><option value="">Choose a provider…</option>${providers.map((provider) => `<option value="${esc(provider.id)}" ${provider.id === editor.pickerProviderId ? "selected" : ""}>${esc(routeProviderLabel(provider))}</option>`).join("")}</select></label>
-        <label class="route-picker-field" for="c-add-model"><span class="label">Model</span><select class="select" id="c-add-model" ${editor.pickerProviderId ? "" : "disabled"}><option value="">${editor.pickerProviderId ? "Choose a model…" : "Choose a provider first…"}</option>${pickerModels.map((model) => `<option value="${esc(model.upstreamModel)}" ${model.upstreamModel === editor.pickerModelId ? "selected" : ""}>${esc(model.name)} · ${esc(model.upstreamModel)}</option>`).join("")}</select></label>
+        <div class="route-picker-field"><div class="model-combo-head"><span class="label">Model</span><label class="model-combo-free"><span>Free only</span><span class="toggle"><input type="checkbox" id="c-add-model-free" ${editor.pickerProviderId ? "" : "disabled"} ${editor.pickerFreeOnly ? "checked" : ""} /><span></span></span></label></div><div class="model-combo"><input class="input model-combo-input" id="c-add-model" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="c-add-model-results" autocomplete="off" spellcheck="false" ${editor.pickerProviderId ? "" : "disabled"} placeholder="${editor.pickerProviderId ? "Search models…" : "Choose a provider first…"}" value="${esc(pickerSelectedModelLabel)}" /><div class="model-combo-results" id="c-add-model-results" role="listbox" hidden></div></div></div>
         <button type="button" class="btn btn-secondary btn-sm route-picker-add" id="btn-add-member" ${editor.pickerProviderId && editor.pickerModelId ? "" : "disabled"}>Add to route</button>
       </div>
       <div class="route-picker-note">When a provider has multiple accounts, ReRouted tries that model on every eligible account before moving to the next route member.</div>
@@ -2001,10 +2009,7 @@ function renderCombos(options = {}) {
     editor.pickerModelId = null;
     renderCombos();
   };
-  $("#c-add-model").onchange = () => {
-    editor.pickerModelId = $("#c-add-model").value || null;
-    $("#btn-add-member").disabled = !editor.pickerProviderId || !editor.pickerModelId;
-  };
+  setupModelCombo(editor, pickerModels);
   $("#btn-add-member").onclick = () => {
     syncComboDraft();
     if (!editor.pickerProviderId) return toast("Choose a provider");
@@ -2053,6 +2058,134 @@ function renderCombos(options = {}) {
   if (options.focusEditor) {
     requestAnimationFrame(() => focusRouteEditor());
   }
+}
+
+// Searchable model combobox for the route editor. Filtering runs entirely inside
+// this element (never renderCombos) so the search input keeps focus while typing.
+function setupModelCombo(editor, pickerModels) {
+  const input = $("#c-add-model");
+  const results = $("#c-add-model-results");
+  const addBtn = $("#btn-add-member");
+  const freeToggle = $("#c-add-model-free");
+  if (!input || !results) return;
+
+  let items = [];
+  let activeIndex = -1;
+  let freeOnly = !!editor.pickerFreeOnly;
+
+  const modelLabel = (model) =>
+    model.name && model.name !== model.upstreamModel
+      ? `${esc(model.name)} · ${esc(model.upstreamModel)}`
+      : esc(model.upstreamModel);
+
+  const paint = (query) => {
+    items = filterModelOptions(pickerModels, query, { freeOnly });
+    if (activeIndex >= items.length) activeIndex = items.length - 1;
+    if (items.length) {
+      results.innerHTML = items
+        .map(
+          (model, index) =>
+            `<div class="model-combo-option${index === activeIndex ? " is-active" : ""}" role="option" data-index="${index}" ${model.upstreamModel === editor.pickerModelId ? 'aria-selected="true"' : ""}>${modelLabel(model)}</div>`
+        )
+        .join("");
+    } else {
+      const emptyText = query.trim()
+        ? `No${freeOnly ? " free" : ""} models match “${esc(query.trim())}”`
+        : freeOnly
+          ? "No free models from this provider"
+          : "No models from this provider";
+      results.innerHTML = `<div class="model-combo-empty">${emptyText}</div>`;
+    }
+  };
+
+  const open = () => {
+    results.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+  };
+  const close = () => {
+    results.hidden = true;
+    input.setAttribute("aria-expanded", "false");
+    activeIndex = -1;
+  };
+
+  const selectModel = (model) => {
+    if (!model) return;
+    editor.pickerModelId = model.upstreamModel;
+    input.value = model.name || model.upstreamModel;
+    if (addBtn) addBtn.disabled = !editor.pickerProviderId || !editor.pickerModelId;
+    close();
+  };
+
+  const scrollActiveIntoView = () => {
+    const el = results.querySelector(".model-combo-option.is-active");
+    if (el) el.scrollIntoView({ block: "nearest" });
+  };
+
+  input.onfocus = () => {
+    input.select();
+    paint("");
+    open();
+  };
+  input.oninput = () => {
+    activeIndex = -1;
+    paint(input.value);
+    open();
+  };
+  input.onkeydown = (event) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      if (results.hidden) return open();
+      if (items.length) activeIndex = Math.min(activeIndex + 1, items.length - 1);
+      paint(input.value);
+      scrollActiveIntoView();
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      if (activeIndex > 0) activeIndex -= 1;
+      paint(input.value);
+      scrollActiveIntoView();
+    } else if (event.key === "Enter") {
+      if (!results.hidden && activeIndex >= 0 && items[activeIndex]) {
+        event.preventDefault();
+        selectModel(items[activeIndex]);
+      }
+    } else if (event.key === "Escape") {
+      if (!results.hidden) {
+        event.preventDefault();
+        close();
+      }
+    }
+  };
+  input.onblur = () => {
+    // Restore the field to the committed selection (or empty) so a half-typed,
+    // uncommitted query never lingers as if it were a chosen model.
+    const chosen = editor.pickerModelId
+      ? pickerModels.find((model) => model.upstreamModel === editor.pickerModelId)
+      : null;
+    input.value = chosen ? chosen.name || chosen.upstreamModel : "";
+    close();
+  };
+
+  // mousedown (not click) fires before the input's blur, so preventDefault keeps
+  // focus on the input and lets us commit the selection ourselves.
+  results.onmousedown = (event) => {
+    const option = event.target.closest(".model-combo-option");
+    if (!option) return;
+    event.preventDefault();
+    selectModel(items[Number(option.dataset.index)]);
+  };
+
+  if (freeToggle) {
+    // Clicking the toggle already blurred the input; refocusing repaints the list
+    // through onfocus with the new freeOnly mode and leaves the field ready to type.
+    freeToggle.onchange = () => {
+      freeOnly = freeToggle.checked;
+      editor.pickerFreeOnly = freeOnly;
+      activeIndex = -1;
+      input.focus();
+    };
+  }
+
+  paint("");
 }
 
 let statsPeriod = "24h";

@@ -1745,6 +1745,94 @@ summary:focus-visible,
   cursor: not-allowed;
 }
 
+.model-combo-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.model-combo-free {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.model-combo-free .toggle {
+  width: 30px;
+  height: 17px;
+  flex: 0 0 30px;
+}
+
+.model-combo-free .toggle span::before {
+  width: 13px;
+  height: 13px;
+}
+
+.model-combo-free .toggle input:checked + span::before {
+  transform: translateX(13px);
+}
+
+.model-combo-free input:disabled + span {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.model-combo {
+  position: relative;
+}
+
+.model-combo-input:disabled {
+  color: var(--faint);
+  background: #e4dfd4;
+  cursor: not-allowed;
+}
+
+.model-combo-results {
+  position: absolute;
+  top: calc(100% - 5px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  max-height: 232px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--paper-strong);
+  box-shadow: 0 12px 28px rgba(27, 29, 24, 0.16);
+}
+
+.model-combo-option {
+  padding: 7px 9px;
+  border-radius: 7px;
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.35;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.model-combo-option:hover,
+.model-combo-option.is-active {
+  background: var(--route-soft);
+  color: var(--route-dark);
+}
+
+.model-combo-option[aria-selected="true"] {
+  font-weight: 600;
+}
+
+.model-combo-empty {
+  padding: 8px 9px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
 .route-picker-add {
   width: 100%;
 }
