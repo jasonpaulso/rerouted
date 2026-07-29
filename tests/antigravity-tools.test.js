@@ -299,6 +299,50 @@ describe("Antigravity tool calling", () => {
     assert.equal(body.request.contents[1].parts[1].thoughtSignature, undefined);
   });
 
+  it("parses CRLF-delimited Gemini SSE text, finish state, and usage", async () => {
+    const frames = [
+      {
+        response: {
+          candidates: [
+            {
+              content: { role: "model", parts: [{ text: "OK" }] },
+              finishReason: "STOP",
+            },
+          ],
+          usageMetadata: {
+            promptTokenCount: 3,
+            candidatesTokenCount: 1,
+            totalTokenCount: 4,
+            cachedContentTokenCount: 2,
+          },
+        },
+      },
+    ].map((payload) => `data: ${JSON.stringify(payload)}\r\n\r\n`);
+    const writes = [];
+
+    const usage = await antigravity.pipeGeminiSse(
+      Readable.from(frames),
+      { write(chunk) { writes.push(chunk); } },
+      "gemini-3-flash-agent"
+    );
+
+    const chunks = parseSseWrites(writes);
+    assert.equal(
+      chunks
+        .map((chunk) => chunk.choices[0].delta.content)
+        .filter(Boolean)
+        .join(""),
+      "OK"
+    );
+    assert.equal(chunks.at(-1).choices[0].finish_reason, "stop");
+    assert.deepEqual(usage, {
+      prompt_tokens: 3,
+      completion_tokens: 1,
+      total_tokens: 4,
+      prompt_tokens_details: { cached_tokens: 2 },
+    });
+  });
+
   it("deduplicates cumulative Gemini SSE text and buffers the final signed tool call", async () => {
     const events = [
       `data: ${JSON.stringify({
