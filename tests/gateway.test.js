@@ -548,6 +548,78 @@ describe("gateway Responses API", () => {
       await new Promise((resolve) => server.close(resolve));
     }
   });
+
+  it("streams visible Antigravity text through Responses from CRLF Gemini SSE", async () => {
+    const store = createStore(tmpConfig());
+    store.seed({
+      providers: [
+        {
+          id: "prov_antigravity",
+          type: "antigravity",
+          name: "Antigravity",
+          accessToken: "antigravity-token",
+          projectId: "test-project",
+          enabled: true,
+          createdAt: 100,
+          models: [
+            { id: "gemini-3-flash-agent", name: "Gemini 3 Flash", enabled: true },
+          ],
+        },
+      ],
+    });
+    const apiKey = store.load().apiKey;
+    let upstreamCalls = 0;
+    const router = createRouter({
+      store,
+      fetchImpl: async () => {
+        upstreamCalls += 1;
+        return new Response(
+          `data: ${JSON.stringify({
+            response: {
+              candidates: [
+                {
+                  content: { role: "model", parts: [{ text: "OK" }] },
+                  finishReason: "STOP",
+                },
+              ],
+              usageMetadata: {
+                promptTokenCount: 3,
+                candidatesTokenCount: 1,
+                totalTokenCount: 4,
+              },
+            },
+          })}\r\n\r\n`,
+          { status: 200, headers: { "Content-Type": "text/event-stream" } }
+        );
+      },
+    });
+    const gateway = createGateway({ store, router });
+    const server = http.createServer((req, res) => gateway.handle(req, res));
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${server.address().port}/v1/responses`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "antigravity/gemini-3-flash-agent",
+          input: "Reply with OK",
+          stream: true,
+        }),
+      });
+      const text = await response.text();
+
+      assert.equal(response.status, 200);
+      assert.equal(upstreamCalls, 1);
+      assert.match(text, /event: response\.output_text\.delta/);
+      assert.match(text, /"delta":"OK"/);
+      assert.match(text, /event: response\.completed/);
+      assert.match(text, /"input_tokens":3/);
+      assert.match(text, /"output_tokens":1/);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
 });
 
 describe("gateway request limits", () => {

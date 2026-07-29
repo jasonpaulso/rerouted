@@ -98,13 +98,13 @@ function createSseParser() {
     push(chunk) {
       buf += chunkToString(chunk);
       const events = [];
-      let idx;
-      while ((idx = buf.indexOf("\n\n")) !== -1) {
-        const block = buf.slice(0, idx);
-        buf = buf.slice(idx + 2);
+      let boundary;
+      while ((boundary = /\r?\n\r?\n/.exec(buf))) {
+        const block = buf.slice(0, boundary.index);
+        buf = buf.slice(boundary.index + boundary[0].length);
         let event = "message";
         let data = "";
-        for (const line of block.split("\n")) {
+        for (const line of block.split(/\r?\n/)) {
           if (line.startsWith("event:")) event = line.slice(6).trim();
           else if (line.startsWith("data:")) data += (data ? "\n" : "") + line.slice(5).trimStart();
         }

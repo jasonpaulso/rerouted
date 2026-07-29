@@ -25,6 +25,10 @@ const COOLDOWN_MS = {
   transient: 30_000,
 };
 const PREOUTPUT_INSPECTION_BYTES = 64 * 1024;
+const CLAUDE_CODE_CANONICAL_ROUTES = new Map([
+  ["claude-fable-5", "fable"],
+  ["claude-opus-4-8", "opus-4.8"],
+]);
 
 function createRequestLog(max = 50) {
   const items = [];
@@ -94,8 +98,26 @@ function makeMember(cfg, provider, upstreamModel, opts) {
   };
 }
 
+function canonicalRouteModelId(cfg, requestedModelId) {
+  const requested = String(requestedModelId || "").trim();
+  const upstreamModel = requested.startsWith("claude/")
+    ? requested.slice("claude/".length)
+    : requested;
+
+  // Account-qualified IDs must continue to address that exact account.
+  if (requested !== upstreamModel && upstreamModel.includes("/")) return requested;
+
+  const routeName = CLAUDE_CODE_CANONICAL_ROUTES.get(upstreamModel.toLowerCase());
+  if (!routeName) return requested;
+  const combo = (cfg.combos || []).find(
+    (entry) => publicComboId(entry).trim().toLowerCase() === routeName
+  );
+  return combo ? publicComboId(combo) : requested;
+}
+
 function resolveTargets(cfg, modelId) {
-  const combo = (cfg.combos || []).find((c) => comboMatchesId(c, modelId));
+  const routeModelId = canonicalRouteModelId(cfg, modelId);
+  const combo = (cfg.combos || []).find((c) => comboMatchesId(c, routeModelId));
   if (combo) {
     const members = (combo.members || [])
       .map((m) => {
@@ -134,7 +156,7 @@ function resolveTargets(cfg, modelId) {
       members,
     };
   }
-  const single = resolveSingle(cfg, modelId);
+  const single = resolveSingle(cfg, routeModelId);
   if (!single) return null;
   return { kind: "single", members: [single], strategy: "fallback" };
 }
@@ -243,7 +265,7 @@ function classifyFailure(status, errorText) {
   const text = String(errorText || "").toLowerCase();
   const quota =
     status === 429 ||
-    /rate[ _-]?limit|too many requests|quota|usage[ _-]?limit|resource[ _-]?exhaust|capacity|overload/.test(text);
+    /rate[ _-]?limit|too many requests|quota|usage[ _-]?limit|resource[ _-]?exhaust|capacity/.test(text);
   if (quota) return { eligible: true, kind: "quota", defaultCooldownMs: COOLDOWN_MS.quota };
   const request =
     /context[ _-]?window|context[ _-]?length[ _-]?exceed|maximum[ _-]?context[ _-]?length|input.{0,80}(?:too[ _-]?long|too[ _-]?large|exceed.{0,40}(?:context|token))|request[ _-]?too[ _-]?large/.test(
@@ -1438,6 +1460,7 @@ module.exports = {
   resolveTargets,
   resolveSingle,
   accountCandidatesFor,
+  canonicalRouteModelId,
   compareAccounts,
   orderMembers,
   isRetryableStatus,
