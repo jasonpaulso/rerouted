@@ -19,6 +19,45 @@ const { isCustomProviderType } = require("./model-ids");
 const { createSseParser } = require("./sse");
 const ANTHROPIC_METADATA = Symbol.for("rerouted.anthropic.metadata");
 
+// Sampling knobs some providers (e.g. Anthropic) reject when present. A per-model
+// toggle can strip these from the body before we forward to the provider.
+const SAMPLING_PARAM_KEYS = [
+  "temperature",
+  "top_p",
+  "top_k",
+  "min_p",
+  "top_a",
+  "frequency_penalty",
+  "presence_penalty",
+  "repetition_penalty",
+];
+
+/**
+ * Return a shallow copy of body with sampling params removed. Never mutates input.
+ * Anthropic requests stash extra options (top_k among them) on a metadata symbol
+ * that the Claude adapter replays onto the upstream body, so clear those too.
+ */
+function stripSamplingParams(body) {
+  if (!body || typeof body !== "object") return body;
+  const out = { ...body };
+  for (const key of SAMPLING_PARAM_KEYS) delete out[key];
+  const meta = out[ANTHROPIC_METADATA];
+  if (meta && typeof meta === "object" && meta.options) {
+    const options = { ...meta.options };
+    for (const key of SAMPLING_PARAM_KEYS) delete options[key];
+    out[ANTHROPIC_METADATA] = { ...meta, options };
+  }
+  return out;
+}
+
+/** Whether the stored model entry for upstreamModel opts out of sampling params. */
+function modelStripsSamplingParams(provider, upstreamModel) {
+  const entry = (provider?.models || []).find(
+    (m) => (typeof m === "string" ? m : m.id) === upstreamModel
+  );
+  return !!entry && typeof entry !== "string" && entry.stripSamplingParams === true;
+}
+
 const COOLDOWN_MS = {
   quota: 60_000,
   auth: 2 * 60_000,
@@ -915,12 +954,16 @@ function createRouter({ store, fetchImpl = fetch, requestLog, timeoutMs, usage, 
       }
     }
 
+    const outBody = modelStripsSamplingParams(provider, upstreamModel)
+      ? stripSamplingParams(body)
+      : body;
+
     const bound = memberSignal(outerSignal, memberTimeoutMs);
     let cleanupDeferred = false;
     try {
       const result = await adapter.chat(provider, {
         model: upstreamModel,
-        body,
+        body: outBody,
         stream,
         signal: bound.signal,
         fetchImpl,
@@ -1472,4 +1515,6 @@ module.exports = {
   isAbortError,
   memberSignal,
   modelIdFor,
+  stripSamplingParams,
+  modelStripsSamplingParams,
 };

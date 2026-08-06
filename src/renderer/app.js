@@ -1406,6 +1406,7 @@ function providerAccountHtml(account, provider) {
   const open = expandedAccountId === account.id;
   const models = account.models || [];
   const onCount = models.filter((model) => model.enabled !== false).length;
+  const stripCount = models.filter((model) => model.stripSamplingParams === true).length;
   const displayName = accountDisplayName(account.name, account.email, provider.name);
   const identity = accountIdentityLabel(
     account.email,
@@ -1434,8 +1435,13 @@ function providerAccountHtml(account, provider) {
           models.length
             ? `<div class="model-bulk-actions" aria-label="Model controls">
                 <span>${onCount} on</span>
-                <button type="button" class="btn btn-secondary btn-sm" data-all-models="on" data-provider-id="${esc(account.id)}" ${onCount === models.length ? "disabled" : ""}>All On</button>
-                <button type="button" class="btn btn-secondary btn-sm" data-all-models="off" data-provider-id="${esc(account.id)}" ${onCount === 0 ? "disabled" : ""}>All Off</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-all-models="on" data-provider-id="${esc(account.id)}" ${onCount === models.length ? "disabled" : ""}>Enable all</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-all-models="off" data-provider-id="${esc(account.id)}" ${onCount === 0 ? "disabled" : ""}>Disable all</button>
+              </div>
+              <div class="model-bulk-actions" aria-label="Sampling parameter controls">
+                <span>${stripCount} stripped</span>
+                <button type="button" class="btn btn-secondary btn-sm" data-all-strip="on" data-provider-id="${esc(account.id)}" ${stripCount === models.length ? "disabled" : ""}>Strip all</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-all-strip="off" data-provider-id="${esc(account.id)}" ${stripCount === 0 ? "disabled" : ""}>Unstrip all</button>
               </div>${models
                 .map(
                   (model) => `
@@ -1444,7 +1450,10 @@ function providerAccountHtml(account, provider) {
               <div class="row-title">${esc(model.name || model.id)}</div>
               <div class="model-id">${esc(model.gatewayId || model.id)}</div>
             </div>
-            <label class="toggle" data-stop-expand="1"><input type="checkbox" data-model-en="${esc(account.id)}" data-mid="${esc(model.id)}" ${model.enabled !== false ? "checked" : ""} /><span></span></label>
+            <div class="model-controls">
+              <button type="button" class="model-chip${model.stripSamplingParams === true ? " active" : ""}" data-model-strip="${esc(account.id)}" data-mid="${esc(model.id)}" data-stop-expand="1" aria-pressed="${model.stripSamplingParams === true}" title="Strip sampling params (temperature, top_p, top_k, penalties) before forwarding — for providers that reject them">strip params</button>
+              <label class="toggle" data-stop-expand="1" title="Enable this model"><input type="checkbox" data-model-en="${esc(account.id)}" data-mid="${esc(model.id)}" ${model.enabled !== false ? "checked" : ""} /><span></span></label>
+            </div>
           </div>`
                 )
                 .join("")}`
@@ -1663,6 +1672,20 @@ function renderProviders() {
       renderProviders();
     });
   });
+  view.querySelectorAll("button[data-model-strip]").forEach((el) => {
+    el.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const strip = el.getAttribute("aria-pressed") !== "true";
+      const result = await api.invoke("app:set-model-strip-params", {
+        providerId: el.dataset.modelStrip,
+        modelId: el.dataset.mid,
+        strip,
+      });
+      if (!result?.ok) return toast("Could not update model");
+      await refresh();
+      renderProviders();
+    });
+  });
   view.querySelectorAll("button[data-all-models]").forEach((button) => {
     button.onclick = async (event) => {
       event.stopPropagation();
@@ -1674,6 +1697,21 @@ function renderProviders() {
       });
       if (!result?.ok) return toast("Could not update models");
       toast(enabled ? "All models enabled" : "All models disabled");
+      await refresh();
+      renderProviders();
+    };
+  });
+  view.querySelectorAll("button[data-all-strip]").forEach((button) => {
+    button.onclick = async (event) => {
+      event.stopPropagation();
+      const strip = button.dataset.allStrip === "on";
+      button.disabled = true;
+      const result = await api.invoke("app:set-all-models-strip-params", {
+        providerId: button.dataset.providerId,
+        strip,
+      });
+      if (!result?.ok) return toast("Could not update models");
+      toast(strip ? "Sampling params stripped" : "Sampling params forwarded");
       await refresh();
       renderProviders();
     };

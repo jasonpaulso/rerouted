@@ -132,4 +132,113 @@ describe("shared control plane", () => {
       enabled: true,
     }), { ok: false, updated: 0, enabled: true });
   });
+
+  it("persists and surfaces the per-model strip-sampling-params flag", async () => {
+    const runtime = tempRuntime();
+    runtime.store.update((cfg) => {
+      cfg.providers.push({
+        id: "prov_strip",
+        type: "openrouter",
+        name: "OpenRouter",
+        apiKey: "sk-test",
+        models: [{ id: "model-a", name: "Model A", enabled: true }],
+      });
+    });
+    const invoke = (channel, ...args) =>
+      runtime.controlPlane.invoke(channel, args, { harness: true });
+
+    assert.deepEqual(
+      await invoke("app:set-model-strip-params", {
+        providerId: "prov_strip",
+        modelId: "model-a",
+        strip: true,
+      }),
+      { ok: true }
+    );
+    const model = runtime.store
+      .load()
+      .providers.find((p) => p.id === "prov_strip")
+      .models.find((m) => m.id === "model-a");
+    assert.equal(model.stripSamplingParams, true);
+
+    const state = await invoke("app:get-state");
+    const surfaced = state.providers
+      .find((p) => p.id === "prov_strip")
+      .models.find((m) => m.id === "model-a");
+    assert.equal(surfaced.stripSamplingParams, true);
+
+    assert.deepEqual(
+      await invoke("app:set-model-strip-params", {
+        providerId: "prov_strip",
+        modelId: "model-a",
+        strip: false,
+      }),
+      { ok: true }
+    );
+    const cleared = runtime.store
+      .load()
+      .providers.find((p) => p.id === "prov_strip")
+      .models.find((m) => m.id === "model-a");
+    assert.notEqual(cleared.stripSamplingParams, true);
+  });
+
+  it("strips or restores sampling params for every model in one update", async () => {
+    const runtime = tempRuntime();
+    runtime.store.update((cfg) => {
+      cfg.providers.push({
+        id: "prov_bulk_strip",
+        type: "openrouter",
+        name: "OpenRouter",
+        models: [{ id: "model-a", name: "Model A", enabled: true }, "model-b"],
+      });
+    });
+    const invoke = (channel, ...args) =>
+      runtime.controlPlane.invoke(channel, args, { harness: true });
+
+    assert.deepEqual(
+      await invoke("app:set-all-models-strip-params", {
+        providerId: "prov_bulk_strip",
+        strip: true,
+      }),
+      { ok: true, updated: 2, strip: true }
+    );
+    assert.deepEqual(
+      runtime.store
+        .load()
+        .providers.find((p) => p.id === "prov_bulk_strip")
+        .models.map((m) => m.stripSamplingParams === true),
+      [true, true]
+    );
+    // Bulk strip must not disturb the independent enabled state.
+    assert.deepEqual(
+      runtime.store
+        .load()
+        .providers.find((p) => p.id === "prov_bulk_strip")
+        .models.map((m) => m.enabled !== false),
+      [true, true]
+    );
+
+    assert.deepEqual(
+      await invoke("app:set-all-models-strip-params", {
+        providerId: "prov_bulk_strip",
+        strip: false,
+      }),
+      { ok: true, updated: 2, strip: false }
+    );
+    assert.deepEqual(
+      runtime.store
+        .load()
+        .providers.find((p) => p.id === "prov_bulk_strip")
+        .models.map((m) => m.stripSamplingParams === true),
+      [false, false]
+    );
+
+    assert.deepEqual(
+      await invoke("app:set-all-models-strip-params", {
+        providerId: "missing",
+        strip: true,
+      }),
+      { ok: false, updated: 0, strip: true }
+    );
+  });
 });

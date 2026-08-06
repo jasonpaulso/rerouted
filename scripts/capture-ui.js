@@ -235,6 +235,7 @@ function registerIpc() {
         gatewayId: model.id,
         name: model.name,
         enabled: model.enabled !== false,
+        stripSamplingParams: model.stripSamplingParams === true,
       }));
       return {
         id: p.id,

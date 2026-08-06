@@ -136,6 +136,9 @@ function mergeOAuthCatalog(provider, { removeRetired = false } = {}) {
       id: model.id,
       name: model.name || model.id,
       enabled: existing.get(model.id)?.enabled !== false,
+      ...(existing.get(model.id)?.stripSamplingParams === true
+        ? { stripSamplingParams: true }
+        : {}),
     })),
     ...(provider.models || []).filter(
       (model) =>
@@ -223,6 +226,7 @@ function migrate(cfg) {
         id: m.id,
         name: m.name || m.id,
         enabled: m.enabled !== false,
+        ...(m.stripSamplingParams === true ? { stripSamplingParams: true } : {}),
       };
     });
     mergeOAuthCatalog(p, { removeRetired: needsRetiredOAuthCleanup });

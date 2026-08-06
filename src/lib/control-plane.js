@@ -97,6 +97,7 @@ function createControlPlane({
       gatewayId: m.id,
       name: m.name,
       enabled: m.enabled !== false,
+      stripSamplingParams: m.stripSamplingParams === true,
     }));
     return {
       id: p.id,
@@ -549,6 +550,24 @@ handle("app:set-model-enabled", async (_e, { providerId, modelId, enabled }) => 
   return { ok: true };
 });
 
+handle("app:set-model-strip-params", async (_e, { providerId, modelId, strip }) => {
+  store.update((cfg) => {
+    const p = cfg.providers.find((x) => x.id === providerId);
+    if (!p) return;
+    if (!Array.isArray(p.models)) p.models = [];
+    let m = p.models.find((x) => (typeof x === "string" ? x : x.id) === modelId);
+    if (!m) {
+      p.models.push({ id: modelId, name: modelId, stripSamplingParams: !!strip });
+    } else if (typeof m === "string") {
+      const i = p.models.indexOf(m);
+      p.models[i] = { id: m, name: m, stripSamplingParams: !!strip };
+    } else {
+      m.stripSamplingParams = !!strip;
+    }
+  });
+  return { ok: true };
+});
+
 handle("app:set-all-models-enabled", async (_e, { providerId, enabled }) => {
   let updated = 0;
   store.update((cfg) => {
@@ -562,6 +581,21 @@ handle("app:set-all-models-enabled", async (_e, { providerId, enabled }) => {
     });
   });
   return { ok: updated > 0, updated, enabled: !!enabled };
+});
+
+handle("app:set-all-models-strip-params", async (_e, { providerId, strip }) => {
+  let updated = 0;
+  store.update((cfg) => {
+    const provider = cfg.providers.find((item) => item.id === providerId);
+    if (!provider || !Array.isArray(provider.models)) return;
+    provider.models = provider.models.map((model) => {
+      updated += 1;
+      return typeof model === "string"
+        ? { id: model, name: model, enabled: true, stripSamplingParams: !!strip }
+        : { ...model, stripSamplingParams: !!strip };
+    });
+  });
+  return { ok: updated > 0, updated, strip: !!strip };
 });
 
 handle("app:add-model", async (_e, { providerId, modelId }) => {

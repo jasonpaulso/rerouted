@@ -74,6 +74,7 @@ function listProviderModels(provider, opts = {}) {
     .map((m) => {
       const mid = typeof m === "string" ? m : m.id;
       const enabled = typeof m === "string" ? true : m.enabled !== false;
+      const stripSamplingParams = typeof m === "string" ? false : m.stripSamplingParams === true;
       return {
         id: modelIdFor(provider, m),
         object: "model",
@@ -84,6 +85,7 @@ function listProviderModels(provider, opts = {}) {
         accountAlias: provider.accountAlias || null,
         upstreamModel: mid,
         enabled,
+        stripSamplingParams,
       };
     })
     .filter((m) => includeDisabled || m.enabled);
