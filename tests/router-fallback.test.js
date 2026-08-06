@@ -94,6 +94,20 @@ function responsesSuccessResponse(content = "ok") {
   );
 }
 
+function claudeSuccessResponse(content = "ok") {
+  return new Response(
+    JSON.stringify({
+      id: "msg-test",
+      type: "message",
+      role: "assistant",
+      content: [{ type: "text", text: content }],
+      stop_reason: "end_turn",
+      usage: { input_tokens: 1, output_tokens: 1 },
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } }
+  );
+}
+
 function authToken(options) {
   return String(options?.headers?.Authorization || "").replace(/^Bearer\s+/i, "");
 }
@@ -146,6 +160,162 @@ describe("provider failure classification", () => {
       ),
       { eligible: false, kind: "request", defaultCooldownMs: 0 }
     );
+    assert.deepEqual(classifyFailure(502, "Overloaded"), {
+      eligible: true,
+      kind: "transient",
+      defaultCooldownMs: 30_000,
+    });
+  });
+});
+
+describe("Claude Code canonical named routes", () => {
+  it("routes Fable through its named fallback and keeps overload locks model-scoped", async () => {
+    const store = createStore(tmpConfig());
+    store.seed({
+      providers: [
+        claudeAccount("prov_claude", "claude-token", 100),
+        chatgptAccount("prov_chatgpt", "chatgpt-token", 200, {
+          models: [{ id: "gpt-5.6-sol", name: "GPT 5.6 Sol", enabled: true }],
+        }),
+      ],
+      combos: [
+        {
+          id: "combo_fable",
+          name: "fable",
+          strategy: "fallback",
+          members: [
+            { providerType: "claude", model: "claude-fable-5" },
+            { providerType: "chatgpt", model: "gpt-5.6-sol" },
+          ],
+        },
+      ],
+    });
+    const calls = [];
+    const logger = captureLogger();
+    const router = createRouter({
+      store,
+      logger,
+      fetchImpl: async (_url, options) => {
+        const token = authToken(options);
+        calls.push(token);
+        if (token === "claude-token") {
+          return new Response(JSON.stringify({ error: { message: "Overloaded" } }), {
+            status: 502,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return successResponse("Fable fallback worked");
+      },
+    });
+
+    const result = await router.chatCompletions({
+      body: {
+        model: "claude/claude-fable-5",
+        messages: [{ role: "user", content: "hello" }],
+        stream: false,
+      },
+    });
+
+    assert.equal(result.ok, true, JSON.stringify(result.error));
+    assert.equal(result.openAiJson.choices[0].message.content, "Fable fallback worked");
+    assert.deepEqual(calls, ["claude-token", "chatgpt-token"]);
+    const locks = store.load().providers.find((provider) => provider.id === "prov_claude").modelLocks;
+    assert.equal(locks["claude-fable-5"].kind, "transient");
+    assert.equal(locks["claude-fable-5"].status, 502);
+    assert.equal(locks["*"], undefined);
+    assert.ok(logger.entries.some((entry) => entry.meta?.event === "route_fallback"));
+  });
+
+  it("routes canonical Opus through opus-4.8 but leaves explicit accounts direct", async () => {
+    const store = createStore(tmpConfig());
+    store.seed({
+      providers: [
+        claudeAccount("prov_claude", "claude-token", 100, {
+          models: [{ id: "claude-opus-4-8", name: "Claude Opus 4.8", enabled: true }],
+        }),
+        chatgptAccount("prov_chatgpt", "chatgpt-token", 200, {
+          models: [{ id: "gpt-5.6-sol", name: "GPT 5.6 Sol", enabled: true }],
+        }),
+      ],
+      combos: [
+        {
+          id: "combo_opus_48",
+          name: "opus-4.8",
+          strategy: "fallback",
+          members: [
+            { providerType: "chatgpt", model: "gpt-5.6-sol" },
+            { providerType: "claude", model: "claude-opus-4-8" },
+          ],
+        },
+      ],
+    });
+    const calls = [];
+    const router = createRouter({
+      store,
+      logger: captureLogger(),
+      fetchImpl: async (_url, options) => {
+        const token = authToken(options);
+        calls.push(token);
+        return token === "claude-token"
+          ? claudeSuccessResponse("explicit Claude account")
+          : successResponse("Opus route first member");
+      },
+    });
+
+    const canonical = await router.chatCompletions({
+      body: {
+        model: "claude/claude-opus-4-8",
+        messages: [{ role: "user", content: "hello" }],
+        stream: false,
+      },
+    });
+    assert.equal(canonical.ok, true, JSON.stringify(canonical.error));
+    assert.equal(canonical.openAiJson.choices[0].message.content, "Opus route first member");
+    assert.deepEqual(calls, ["chatgpt-token"]);
+
+    calls.length = 0;
+    const explicit = await router.chatCompletions({
+      body: {
+        model: "claude/oauth1/claude-opus-4-8",
+        messages: [{ role: "user", content: "hello" }],
+        stream: false,
+      },
+    });
+    assert.equal(explicit.ok, true, JSON.stringify(explicit.error));
+    assert.equal(explicit.openAiJson.choices[0].message.content, "explicit Claude account");
+    assert.deepEqual(calls, ["claude-token"]);
+  });
+
+  it("keeps canonical Claude IDs direct when no matching named route exists", async () => {
+    const store = createStore(tmpConfig());
+    store.seed({
+      providers: [
+        claudeAccount("prov_claude", "claude-token", 100, {
+          models: [{ id: "claude-opus-4-8", name: "Claude Opus 4.8", enabled: true }],
+        }),
+      ],
+    });
+    const calls = [];
+    const router = createRouter({
+      store,
+      logger: captureLogger(),
+      fetchImpl: async (_url, options) => {
+        calls.push(authToken(options));
+        return claudeSuccessResponse("direct Claude model");
+      },
+    });
+
+    const result = await router.chatCompletions({
+      body: {
+        model: "claude/claude-opus-4-8",
+        messages: [{ role: "user", content: "hello" }],
+        stream: false,
+      },
+    });
+
+    assert.equal(result.ok, true, JSON.stringify(result.error));
+    assert.equal(result.openAiJson.choices[0].message.content, "direct Claude model");
+    assert.deepEqual(calls, ["claude-token"]);
   });
 });
 

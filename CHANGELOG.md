@@ -9,6 +9,14 @@ Release tags use the form `vX.Y.Z` and match `package.json`. GitHub Releases car
 
 ## [Unreleased]
 
+## [0.5.10] - 2026-07-29
+
+### Fixed
+
+- Antigravity Flash and Pro streaming responses now accept Google's CRLF-delimited SSE frames instead of completing with empty output.
+- Claude Code's canonical Fable and Claude Opus 4.8 model IDs now resolve through matching `fable` and `opus-4.8` named routes, preserving configured cross-provider fallback.
+- Anthropic overload responses now create short model-scoped transient cooldowns instead of misleading quota-wide account locks.
+
 ## [0.5.9] - 2026-07-23
 
 ### Fixed
@@ -100,7 +108,8 @@ Release tags use the form `vX.Y.Z` and match `package.json`. GitHub Releases car
 
 See [GitHub Releases](https://github.com/gitcommit90/rerouted/releases) for artifact digests and notes prior to the Keep a Changelog narrative. Notable themes in late 0.4.x included signed/notarized distribution, in-app updates, named routes, OAuth account pools, OpenAI chat completions and Responses routing, and launch hardening.
 
-[Unreleased]: https://github.com/gitcommit90/rerouted/compare/v0.5.9...HEAD
+[Unreleased]: https://github.com/gitcommit90/rerouted/compare/v0.5.10...HEAD
+[0.5.10]: https://github.com/gitcommit90/rerouted/releases/tag/v0.5.10
 [0.5.9]: https://github.com/gitcommit90/rerouted/releases/tag/v0.5.9
 [0.5.8]: https://github.com/gitcommit90/rerouted/releases/tag/v0.5.8
 [0.5.7]: https://github.com/gitcommit90/rerouted/releases/tag/v0.5.7
