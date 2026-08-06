@@ -16,14 +16,14 @@ Sync by merging `upstream/main` into `develop`.
 
 Upstream is **MIT**, © 2026 Joseph Yaksich. Verified in-repo: `LICENSE` has a single commit in its history (`7a0dda6`), always MIT; no CLA, no DCO, no `NOTICE`, no trademark assertion anywhere.
 
-MIT grants use, copy, modify, merge, publish, distribute, sublicense, and sell. Forking and rebranding is squarely inside the grant.
+MIT grants use, copy, modify, merge, publish, distribute, sublicense, and sell. So we may fork the code and ship it under a name of our own — the grant covers the code, and our name is ours because it is not theirs, not because MIT hands it to us. See point 3.
 
 **What we owe, and where the grant stops:**
 
 1. Keep the copyright notice and permission notice in all copies and substantial portions. Never delete or rewrite `LICENSE` — add our copyright line alongside theirs, not instead of it.
-2. Ship `LICENSE` inside distributed builds. The packaged `.app` already carries it.
+2. Ship `LICENSE` inside distributed builds. The packaged `.app` already carries it — as it does `LICENSES.chromium.html`, which satisfies Electron's and Chromium's own attribution terms. Those ride along with any Electron app we distribute, independent of upstream. `electron-packager` includes both automatically; a hand-assembled release is where they get dropped.
 3. **Name, domain, and icon are not licensed.** MIT is copyright-only and says nothing about trademarks. "ReRouted" and `rerouted.dev` remain theirs. A public rebrand needs our own name; note `package.json` still reads `@gitcommit90/rerouted`.
-4. **The grant is per-commit, not perpetual over the project.** Code already merged is permanently ours to use — MIT is irrevocable once released. But future upstream commits could ship under different terms. See the hook below.
+4. **The grant is per-commit, not perpetual over the project.** Nothing binds upstream to keep publishing under MIT, so a future commit could arrive under different terms. What is observable about code already merged: the license text grants its permissions with no revocation clause and no expiry, and it is widely read as irrevocable once released — but that reading is legal interpretation, not something the text states. Do not treat it as settled if real money rides on it. See the hook below.
 
 `CONTRIBUTING.md` says external PRs are not accepted. That is upstream's policy for their repo, not a license term, and it restricts what they merge — not what we may do. It restates MIT in the same paragraph.
 
@@ -39,7 +39,14 @@ Every fresh clone must opt in once:
 git config core.hooksPath .githooks
 ```
 
-Git has **no fetch hook**, so this fires at merge time, not download time. It also does not run on a conflicted merge or on rebase. Treat it as a safety net under reading the diff, not a replacement for it.
+Verified against regular merges and squash merges (`--squash` stages without moving `HEAD`, so the hook diffs the index in that mode), both warning correctly and staying silent on unrelated merges.
+
+Gaps, in order of how much they should worry you:
+
+- Git has **no fetch hook**. This fires at merge time, not download time.
+- It does not run on a **conflicted merge** or on **rebase**. This gap tightens exactly when it matters most: once we add our own copyright line to `LICENSE` during rebrand, every upstream merge touching `LICENSE` will conflict — and conflicts skip the hook. A conflict is loud on its own, so this is acceptable, but do not read the hook as steady-state coverage of `LICENSE` after rebrand.
+
+Treat it as a safety net under reading the diff, not a replacement for it.
 
 ## Known traps
 

@@ -8,12 +8,24 @@
 # Git has no fetch hook, so this cannot warn at download time. It also does not
 # run on a conflicted merge or on rebase.
 
-if ! git rev-parse --verify --quiet ORIG_HEAD >/dev/null; then
-  exit 0
-fi
+WATCHED="LICENSE LICENSE.* COPYING COPYING.* NOTICE package.json"
 
-changed=$(git diff --name-only ORIG_HEAD HEAD -- \
-  LICENSE 'LICENSE.*' COPYING 'COPYING.*' NOTICE package.json)
+# $1 is 1 for a squash merge, which stages its changes and leaves HEAD alone.
+# Diffing ORIG_HEAD..HEAD there compares a commit to itself and sees nothing,
+# so compare the index instead. Upstream prefers squash merges, so this is the
+# common path, not an edge case.
+if [ "$1" = "1" ]; then
+  before=HEAD
+  after=""
+  changed=$(git diff --cached --name-only HEAD -- $WATCHED)
+else
+  if ! git rev-parse --verify --quiet ORIG_HEAD >/dev/null; then
+    exit 0
+  fi
+  before=ORIG_HEAD
+  after=HEAD
+  changed=$(git diff --name-only ORIG_HEAD HEAD -- $WATCHED)
+fi
 
 if [ -z "$changed" ]; then
   exit 0
@@ -28,10 +40,10 @@ flagged=""
 for file in $changed; do
   if [ "$file" = "package.json" ]; then
     # package.json churns constantly; only its license field is interesting.
-    before=$(license_field ORIG_HEAD)
-    after=$(license_field HEAD)
-    if [ "$before" != "$after" ]; then
-      flagged="$flagged package.json(license: ${before:-none} -> ${after:-none})"
+    was=$(license_field "$before")
+    now=$(license_field "$after")
+    if [ "$was" != "$now" ]; then
+      flagged="$flagged package.json(license: ${was:-none} -> ${now:-none})"
     fi
   else
     flagged="$flagged $file"
@@ -42,6 +54,12 @@ if [ -z "$flagged" ]; then
   exit 0
 fi
 
+if [ "$1" = "1" ]; then
+  review="git diff --cached HEAD -- LICENSE package.json"
+else
+  review="git diff ORIG_HEAD HEAD -- LICENSE package.json"
+fi
+
 printf '\n\033[33m!\033[0m licensing terms changed in this merge:\033[1m%s\033[0m\n' "$flagged"
 printf '  review before building on it:\n'
-printf '    git diff ORIG_HEAD HEAD -- LICENSE package.json\n\n'
+printf '    %s\n\n' "$review"
