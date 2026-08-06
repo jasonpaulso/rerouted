@@ -1,0 +1,47 @@
+#!/bin/sh
+# Warn when a merge changed licensing terms.
+#
+# Upstream is MIT today. The grant on code already merged is irrevocable, but
+# future upstream commits could ship under different terms. This fires at the
+# moment that matters: when their code lands in our tree.
+#
+# Git has no fetch hook, so this cannot warn at download time. It also does not
+# run on a conflicted merge or on rebase.
+
+if ! git rev-parse --verify --quiet ORIG_HEAD >/dev/null; then
+  exit 0
+fi
+
+changed=$(git diff --name-only ORIG_HEAD HEAD -- \
+  LICENSE 'LICENSE.*' COPYING 'COPYING.*' NOTICE package.json)
+
+if [ -z "$changed" ]; then
+  exit 0
+fi
+
+license_field() {
+  git show "$1:package.json" 2>/dev/null |
+    sed -n 's/.*"license"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+}
+
+flagged=""
+for file in $changed; do
+  if [ "$file" = "package.json" ]; then
+    # package.json churns constantly; only its license field is interesting.
+    before=$(license_field ORIG_HEAD)
+    after=$(license_field HEAD)
+    if [ "$before" != "$after" ]; then
+      flagged="$flagged package.json(license: ${before:-none} -> ${after:-none})"
+    fi
+  else
+    flagged="$flagged $file"
+  fi
+done
+
+if [ -z "$flagged" ]; then
+  exit 0
+fi
+
+printf '\n\033[33m!\033[0m licensing terms changed in this merge:\033[1m%s\033[0m\n' "$flagged"
+printf '  review before building on it:\n'
+printf '    git diff ORIG_HEAD HEAD -- LICENSE package.json\n\n'
