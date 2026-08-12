@@ -320,6 +320,96 @@ describe("Claude Code canonical named routes", () => {
 });
 
 describe("same-provider OAuth account fallback", () => {
+  it("retries transport failures without locking the account", async () => {
+    const store = createStore(tmpConfig());
+    store.seed({ providers: [chatgptAccount("prov_a", "token-a", 100)] });
+    const logger = captureLogger();
+    let calls = 0;
+    const router = createRouter({
+      store,
+      logger,
+      transportRetryDelayMs: 0,
+      fetchImpl: async () => {
+        calls += 1;
+        if (calls < 3) {
+          const cause = new Error("getaddrinfo EAI_AGAIN chatgpt.com");
+          cause.code = "EAI_AGAIN";
+          throw new TypeError("fetch failed", { cause });
+        }
+        return responsesSuccessResponse("recovered");
+      },
+    });
+
+    const result = await router.chatCompletions({
+      body: {
+        model: "chatgpt/gpt-5.4",
+        messages: [{ role: "user", content: "hello" }],
+        stream: false,
+      },
+    });
+
+    assert.equal(result.ok, true, JSON.stringify(result.error));
+    assert.equal(calls, 3);
+    assert.deepEqual(store.load().providers[0].modelLocks, {});
+    const retries = logger.entries.filter((entry) => entry.meta?.event === "transport_retry_scheduled");
+    assert.equal(retries.length, 2);
+    assert.match(retries[0].meta.error, /EAI_AGAIN/);
+  });
+
+  it("advances a route after transport retries are exhausted without locking the account", async () => {
+    const store = createStore(tmpConfig());
+    store.seed({
+      providers: [
+        chatgptAccount("prov_chatgpt", "chatgpt-token", 100),
+        claudeAccount("prov_claude", "claude-token", 200),
+      ],
+      combos: [
+        {
+          id: "transport-fallback",
+          name: "transport-fallback",
+          strategy: "fallback",
+          members: [
+            { providerId: "prov_chatgpt", model: "gpt-5.4" },
+            { providerId: "prov_claude", model: "claude-fable-5" },
+          ],
+        },
+      ],
+    });
+    const calls = [];
+    const logger = captureLogger();
+    const router = createRouter({
+      store,
+      logger,
+      transportRetryDelayMs: 0,
+      fetchImpl: async (_url, options) => {
+        const token = authToken(options);
+        calls.push(token);
+        if (token === "chatgpt-token") {
+          const cause = new Error("socket disconnected before TLS handshake");
+          cause.code = "ECONNRESET";
+          throw new TypeError("fetch failed", { cause });
+        }
+        return claudeSuccessResponse("fallback worked");
+      },
+    });
+
+    const result = await router.chatCompletions({
+      body: {
+        model: "transport-fallback",
+        messages: [{ role: "user", content: "hello" }],
+        stream: false,
+      },
+    });
+
+    assert.equal(result.ok, true, JSON.stringify(result.error));
+    assert.equal(result.openAiJson.choices[0].message.content, "fallback worked");
+    assert.deepEqual(calls, ["chatgpt-token", "chatgpt-token", "chatgpt-token", "claude-token"]);
+    assert.deepEqual(store.load().providers.find((provider) => provider.id === "prov_chatgpt").modelLocks, {});
+    const failure = logger.entries.find((entry) => entry.meta?.event === "account_failure");
+    assert.equal(failure.meta.error, "Upstream connection failed after 2 retries");
+    assert.match(failure.meta.transportCause, /ECONNRESET/);
+  });
+
   it("does not turn context failures into cooldowns or a terminal 429", async () => {
     const store = createStore(tmpConfig());
     const quotaLock = {
