@@ -9,6 +9,12 @@ Release tags use the form `vX.Y.Z` and match `package.json`. GitHub Releases car
 
 ## [Unreleased]
 
+## [0.5.11] - 2026-08-12
+
+### Fixed
+
+- Connection-level failures now retry twice at ten-second intervals, preserve their underlying network cause in logs, advance named-route fallback after exhaustion, and never create misleading OAuth account locks.
+
 ## [0.5.10] - 2026-07-29
 
 ### Fixed
@@ -108,7 +114,8 @@ Release tags use the form `vX.Y.Z` and match `package.json`. GitHub Releases car
 
 See [GitHub Releases](https://github.com/gitcommit90/rerouted/releases) for artifact digests and notes prior to the Keep a Changelog narrative. Notable themes in late 0.4.x included signed/notarized distribution, in-app updates, named routes, OAuth account pools, OpenAI chat completions and Responses routing, and launch hardening.
 
-[Unreleased]: https://github.com/gitcommit90/rerouted/compare/v0.5.10...HEAD
+[Unreleased]: https://github.com/gitcommit90/rerouted/compare/v0.5.11...HEAD
+[0.5.11]: https://github.com/gitcommit90/rerouted/compare/v0.5.10...v0.5.11
 [0.5.10]: https://github.com/gitcommit90/rerouted/releases/tag/v0.5.10
 [0.5.9]: https://github.com/gitcommit90/rerouted/releases/tag/v0.5.9
 [0.5.8]: https://github.com/gitcommit90/rerouted/releases/tag/v0.5.8

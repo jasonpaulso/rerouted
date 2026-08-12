@@ -24,6 +24,8 @@ const COOLDOWN_MS = {
   auth: 2 * 60_000,
   transient: 30_000,
 };
+const TRANSPORT_RETRY_DELAY_MS = 10_000;
+const TRANSPORT_RETRY_ATTEMPTS = 2;
 const PREOUTPUT_INSPECTION_BYTES = 64 * 1024;
 const CLAUDE_CODE_CANONICAL_ROUTES = new Map([
   ["claude-fable-5", "fable"],
@@ -746,6 +748,66 @@ function isAbortError(err) {
   return /aborted|timeout|TimeoutError/i.test(msg);
 }
 
+function transportErrorMessage(error) {
+  const parts = [];
+  const seen = new Set();
+  let current = error;
+  for (let depth = 0; current && depth < 4; depth += 1) {
+    if (seen.has(current)) break;
+    seen.add(current);
+    const code = typeof current.code === "string" ? current.code.trim() : "";
+    const message = String(current.message || current).trim();
+    const detail = code && !message.includes(code) ? `${code}: ${message}` : message;
+    if (detail && !parts.includes(detail)) parts.push(detail);
+    current = current.cause;
+  }
+  return parts.join("; ") || "Upstream connection failed";
+}
+
+function isTransportError(error) {
+  const codes = new Set([
+    "EAI_AGAIN",
+    "ECONNABORTED",
+    "ECONNREFUSED",
+    "ECONNRESET",
+    "EHOSTUNREACH",
+    "ENETDOWN",
+    "ENETUNREACH",
+    "ENOTFOUND",
+    "EPIPE",
+    "ETIMEDOUT",
+    "UND_ERR_CONNECT_TIMEOUT",
+    "UND_ERR_HEADERS_TIMEOUT",
+    "UND_ERR_SOCKET",
+  ]);
+  const seen = new Set();
+  let current = error;
+  for (let depth = 0; current && depth < 4; depth += 1) {
+    if (seen.has(current)) break;
+    seen.add(current);
+    if (codes.has(current.code)) return true;
+    if (/\bfetch failed\b/i.test(String(current.message || ""))) return true;
+    current = current.cause;
+  }
+  return false;
+}
+
+function waitForTransportRetry(ms, signal) {
+  if (signal?.aborted) return Promise.resolve(false);
+  if (!ms || ms <= 0) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    let timer;
+    const finish = (ready) => {
+      if (timer) clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      resolve(ready);
+    };
+    const onAbort = () => finish(false);
+    timer = setTimeout(() => finish(true), ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 function memberSignal(outer, timeoutMs) {
   const ms = timeoutMs ?? REQUEST_TIMEOUT_MS;
   const ctrl = new AbortController();
@@ -790,7 +852,16 @@ function memberSignal(outer, timeoutMs) {
 /**
  * @param {{ store, fetchImpl?, requestLog?, timeoutMs?, usage?, logger? }} opts
  */
-function createRouter({ store, fetchImpl = fetch, requestLog, timeoutMs, usage, logger = appLogger } = {}) {
+function createRouter({
+  store,
+  fetchImpl = fetch,
+  requestLog,
+  timeoutMs,
+  usage,
+  logger = appLogger,
+  transportRetryDelayMs = TRANSPORT_RETRY_DELAY_MS,
+  transportRetryAttempts = TRANSPORT_RETRY_ATTEMPTS,
+} = {}) {
   const rrState = new Map();
   const log = requestLog || createRequestLog();
   let totalRequests = 0;
@@ -1158,17 +1229,29 @@ function createRouter({ store, fetchImpl = fetch, requestLog, timeoutMs, usage, 
         return {
           ok: false,
           status: 408,
-          error: e.message || "Upstream request timeout",
-          cooldownEligible: true,
-          failureKind: "transient",
-          defaultCooldownMs: COOLDOWN_MS.transient,
+          error: transportErrorMessage(e) || "Upstream request timeout",
+          cooldownEligible: false,
+          failureKind: "transport",
+          defaultCooldownMs: 0,
+          transportError: false,
         };
       }
-      const error = e.message || String(e);
+      const error = transportErrorMessage(e);
       const classification = classifyFailure(502, error);
+      if (classification.kind !== "request" && isTransportError(e)) {
+        return {
+          ok: false,
+          status: 502,
+          error,
+          cooldownEligible: false,
+          failureKind: "transport",
+          defaultCooldownMs: 0,
+          transportError: true,
+        };
+      }
       return {
         ok: false,
-        status: classification.kind === "request" ? 400 : 502,
+        status: 400,
         error,
         cooldownEligible: classification.eligible,
         failureKind: classification.kind,
@@ -1290,19 +1373,55 @@ function createRouter({ store, fetchImpl = fetch, requestLog, timeoutMs, usage, 
           }
         }
         let result;
-        try {
-          result = await tryMember(attemptMember, body, stream, signal);
-        } catch (e) {
-          const status = isAbortError(e) ? 408 : 500;
-          const classification = classifyFailure(status, e.message);
-          result = {
-            ok: false,
-            status,
-            error: e.message || String(e),
-            cooldownEligible: classification.eligible,
-            failureKind: classification.kind,
-            defaultCooldownMs: classification.defaultCooldownMs,
-          };
+        let transportRetry = 0;
+        while (true) {
+          try {
+            result = await tryMember(attemptMember, body, stream, signal);
+          } catch (e) {
+            const status = isAbortError(e) ? 408 : 500;
+            const error = transportErrorMessage(e);
+            const classification = classifyFailure(status, error);
+            const transportError = isTransportError(e);
+            result = {
+              ok: false,
+              status,
+              error,
+              cooldownEligible: transportError ? false : classification.eligible,
+              failureKind: transportError ? "transport" : classification.kind,
+              defaultCooldownMs: transportError ? 0 : classification.defaultCooldownMs,
+              transportError,
+            };
+          }
+          if (!result.transportError || result.canceled || transportRetry >= transportRetryAttempts) {
+            break;
+          }
+          transportRetry += 1;
+          logger.warn("router transport retry scheduled", {
+            event: "transport_retry_scheduled",
+            routeModel: modelId,
+            upstreamModel: member.upstreamModel,
+            providerId: provider.id,
+            providerType: canonicalProviderType(provider.type),
+            providerName: provider.name,
+            accountAlias: provider.accountAlias || null,
+            status: result.status,
+            error: result.error,
+            retryAttempt: transportRetry,
+            maxRetries: transportRetryAttempts,
+            retryDelayMs: transportRetryDelayMs,
+          });
+          if (!(await waitForTransportRetry(transportRetryDelayMs, signal))) {
+            result = {
+              ok: false,
+              status: 499,
+              error: "Client disconnected",
+              cooldownEligible: false,
+              canceled: true,
+              failureKind: "canceled",
+              defaultCooldownMs: 0,
+            };
+            break;
+          }
         }
 
         if (result.ok) {
