@@ -1478,7 +1478,14 @@ function createRouter({
           };
         }
 
-        const savedLock = persistModelLock(provider, member.upstreamModel, result);
+        const transportCause = result.transportError ? result.error : null;
+        const publicError = result.transportError
+          ? `Upstream connection failed after ${transportRetryAttempts} retries`
+          : result.error;
+        const savedLock = persistModelLock(provider, member.upstreamModel, {
+          ...result,
+          error: publicError,
+        });
         const failed = {
           providerId: provider.id,
           providerType: canonicalProviderType(provider.type),
@@ -1486,7 +1493,7 @@ function createRouter({
           accountAlias: provider.accountAlias || null,
           model: member.upstreamModel,
           status: result.status,
-          error: result.error,
+          error: publicError,
           failureKind: result.failureKind,
           retryable: true,
           lockedUntil: savedLock?.until || null,
@@ -1497,6 +1504,7 @@ function createRouter({
           event: oauthAttempt ? "account_failure" : "route_member_failure",
           routeModel: modelId,
           ...failed,
+          ...(transportCause ? { transportCause } : {}),
         });
         fallbackFrom = failed;
       }

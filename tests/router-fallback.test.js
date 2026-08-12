@@ -376,9 +376,10 @@ describe("same-provider OAuth account fallback", () => {
       ],
     });
     const calls = [];
+    const logger = captureLogger();
     const router = createRouter({
       store,
-      logger: captureLogger(),
+      logger,
       transportRetryDelayMs: 0,
       fetchImpl: async (_url, options) => {
         const token = authToken(options);
@@ -404,6 +405,9 @@ describe("same-provider OAuth account fallback", () => {
     assert.equal(result.openAiJson.choices[0].message.content, "fallback worked");
     assert.deepEqual(calls, ["chatgpt-token", "chatgpt-token", "chatgpt-token", "claude-token"]);
     assert.deepEqual(store.load().providers.find((provider) => provider.id === "prov_chatgpt").modelLocks, {});
+    const failure = logger.entries.find((entry) => entry.meta?.event === "account_failure");
+    assert.equal(failure.meta.error, "Upstream connection failed after 2 retries");
+    assert.match(failure.meta.transportCause, /ECONNRESET/);
   });
 
   it("does not turn context failures into cooldowns or a terminal 429", async () => {
