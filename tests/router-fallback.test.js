@@ -320,6 +320,43 @@ describe("Claude Code canonical named routes", () => {
 });
 
 describe("same-provider OAuth account fallback", () => {
+  it("retries an HTTP proxy connection reset without locking the account", async () => {
+    const store = createStore(tmpConfig());
+    store.seed({ providers: [chatgptAccount("prov_a", "token-a", 100)] });
+    const logger = captureLogger();
+    let calls = 0;
+    const router = createRouter({
+      store,
+      logger,
+      transportRetryDelayMs: 0,
+      fetchImpl: async () => {
+        calls += 1;
+        if (calls < 3) {
+          return new Response(
+            "upstream connect error or disconnect/reset before headers. reset reason: connection termination",
+            { status: 503 }
+          );
+        }
+        return responsesSuccessResponse("recovered");
+      },
+    });
+
+    const result = await router.chatCompletions({
+      body: {
+        model: "chatgpt/gpt-5.4",
+        messages: [{ role: "user", content: "hello" }],
+        stream: false,
+      },
+    });
+
+    assert.equal(result.ok, true, JSON.stringify(result.error));
+    assert.equal(calls, 3);
+    assert.deepEqual(store.load().providers[0].modelLocks, {});
+    const retries = logger.entries.filter((entry) => entry.meta?.event === "transport_retry_scheduled");
+    assert.equal(retries.length, 2);
+    assert.match(retries[0].meta.error, /disconnect\/reset before headers/);
+  });
+
   it("retries transport failures without locking the account", async () => {
     const store = createStore(tmpConfig());
     store.seed({ providers: [chatgptAccount("prov_a", "token-a", 100)] });

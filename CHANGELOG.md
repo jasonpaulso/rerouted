@@ -9,6 +9,12 @@ Release tags use the form `vX.Y.Z` and match `package.json`. GitHub Releases car
 
 ## [Unreleased]
 
+## [0.5.12] - 2026-08-12
+
+### Fixed
+
+- Proxy-generated HTTP 502/503/504 connection-reset responses now use the same retry, no-lock, and route-fallback behavior as thrown socket failures.
+
 ## [0.5.11] - 2026-08-12
 
 ### Fixed

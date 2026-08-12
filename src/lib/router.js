@@ -274,6 +274,14 @@ function classifyFailure(status, errorText) {
       text
     );
   if (request) return { eligible: false, kind: "request", defaultCooldownMs: 0 };
+  const transportResponse =
+    [502, 503, 504].includes(Number(status)) &&
+    /upstream connect error|disconnect\/reset before headers|reset reason:\s*(?:connection|remote)|connection (?:termination|reset|refused)|socket hang up|tls (?:handshake|connection)|(?:dns|name) resolution|no healthy upstream|upstream (?:request )?timeout|gateway timeout/.test(
+      text
+    );
+  if (transportResponse) {
+    return { eligible: false, kind: "transport", defaultCooldownMs: 0 };
+  }
   const capability =
     (status === 400 || status === 404 || status === 422) &&
     (/(?:unsupported|invalid|unknown)[ _-]?model|model[ _-]?(?:not[ _-]?found|unsupported|unavailable)/.test(
@@ -1014,6 +1022,7 @@ function createRouter({
             failureKind: classification.kind,
             defaultCooldownMs: classification.defaultCooldownMs,
             resetAt: inspected.failure.resetAt,
+            transportError: classification.kind === "transport",
           };
         }
         if (inspected.openAiJson) {
@@ -1076,6 +1085,7 @@ function createRouter({
           failureKind: classification.kind,
           defaultCooldownMs: classification.defaultCooldownMs,
           resetAt: parseResetHint(res, text),
+          transportError: classification.kind === "transport",
         };
       }
 
@@ -1186,6 +1196,7 @@ function createRouter({
           failureKind: classification.kind,
           defaultCooldownMs: classification.defaultCooldownMs,
           resetAt: parseResetHint(res, JSON.stringify(raw)),
+          transportError: classification.kind === "transport",
         };
       }
       let openAiJson = raw;
