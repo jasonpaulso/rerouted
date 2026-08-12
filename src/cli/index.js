@@ -3,10 +3,13 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const { configureNetworkDefaults } = require("../lib/network");
 const { createHeadlessRuntime, createProcessLock, defaultUserData } = require("../lib/headless-runtime");
 const { createPrompts } = require("./prompts");
 const { runFirstSetup } = require("./setup");
 const packageJson = require("../../package.json");
+
+configureNetworkDefaults();
 
 const HELP = `ReRouted ${packageJson.version}
 

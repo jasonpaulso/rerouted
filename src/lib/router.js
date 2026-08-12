@@ -759,15 +759,17 @@ function isAbortError(err) {
 function transportErrorMessage(error) {
   const parts = [];
   const seen = new Set();
-  let current = error;
-  for (let depth = 0; current && depth < 4; depth += 1) {
-    if (seen.has(current)) break;
+  const pending = [error];
+  for (let inspected = 0; pending.length && inspected < 12; inspected += 1) {
+    const current = pending.shift();
+    if (!current || seen.has(current)) continue;
     seen.add(current);
     const code = typeof current.code === "string" ? current.code.trim() : "";
     const message = String(current.message || current).trim();
     const detail = code && !message.includes(code) ? `${code}: ${message}` : message;
     if (detail && !parts.includes(detail)) parts.push(detail);
-    current = current.cause;
+    if (current.cause) pending.push(current.cause);
+    if (Array.isArray(current.errors)) pending.push(...current.errors);
   }
   return parts.join("; ") || "Upstream connection failed";
 }

@@ -320,6 +320,43 @@ describe("Claude Code canonical named routes", () => {
 });
 
 describe("same-provider OAuth account fallback", () => {
+  it("logs the individual socket causes hidden inside a Node AggregateError", async () => {
+    const store = createStore(tmpConfig());
+    store.seed({ providers: [chatgptAccount("prov_a", "token-a", 100)] });
+    const logger = captureLogger();
+    const router = createRouter({
+      store,
+      logger,
+      transportRetryDelayMs: 0,
+      transportRetryAttempts: 0,
+      fetchImpl: async () => {
+        const timeout = Object.assign(new Error("connect timed out 172.64.155.209:443"), {
+          code: "ETIMEDOUT",
+        });
+        const unreachable = Object.assign(new Error("connect unreachable 2606:4700::1:443"), {
+          code: "ENETUNREACH",
+        });
+        throw new TypeError("fetch failed", {
+          cause: new AggregateError([timeout, unreachable], "connection attempts failed"),
+        });
+      },
+    });
+
+    const result = await router.chatCompletions({
+      body: {
+        model: "chatgpt/gpt-5.4",
+        messages: [{ role: "user", content: "hello" }],
+        stream: false,
+      },
+    });
+
+    assert.equal(result.ok, false);
+    const failure = logger.entries.find((entry) => entry.meta?.event === "account_failure");
+    assert.match(failure.meta.transportCause, /ETIMEDOUT.*172\.64\.155\.209/);
+    assert.match(failure.meta.transportCause, /ENETUNREACH.*2606:4700/);
+    assert.deepEqual(store.load().providers[0].modelLocks, {});
+  });
+
   it("retries an HTTP proxy connection reset without locking the account", async () => {
     const store = createStore(tmpConfig());
     store.seed({ providers: [chatgptAccount("prov_a", "token-a", 100)] });
