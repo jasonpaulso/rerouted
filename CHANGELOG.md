@@ -9,6 +9,13 @@ Release tags use the form `vX.Y.Z` and match `package.json`. GitHub Releases car
 
 ## [Unreleased]
 
+## [0.5.12] - 2026-08-12
+
+### Fixed
+
+- Proxy-generated HTTP 502/503/504 connection-reset responses now use the same retry, no-lock, and route-fallback behavior as thrown socket failures.
+- Outbound connections now allow five seconds per resolved address instead of Node's 250-millisecond default, preventing healthy but moderately latent TCP handshakes from being misreported as `ETIMEDOUT` across every ChatGPT address.
+
 ## [0.5.11] - 2026-08-12
 
 ### Fixed
