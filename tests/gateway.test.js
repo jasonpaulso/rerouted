@@ -826,12 +826,14 @@ describe("claude oauth request shaping", () => {
     const h = seen.opts.headers;
     assert.equal(h["X-App"], "cli");
     assert.ok(String(h["User-Agent"]).startsWith("claude-cli/"));
+    assert.ok(String(h["User-Agent"]).includes("2.1.251"), "new Claude models require the current supported CLI fingerprint");
     assert.ok(String(h["User-Agent"]).includes("(external, cli)"));
     assert.ok(h["X-Stainless-Os"]);
     assert.ok(h["X-Claude-Code-Session-Id"]);
     assert.ok(String(h["Anthropic-Beta"]).includes("oauth-2025-04-20"));
     const body = JSON.parse(seen.opts.body);
     assert.ok(body.system?.[0]?.text?.startsWith("x-anthropic-billing-header:"));
+    assert.ok(body.system[0].text.includes("cc_version=2.1.251."));
     assert.equal(body.system.length, 3);
     assert.ok(body.metadata?.user_id);
   });
@@ -1291,7 +1293,7 @@ describe("requested OAuth model catalogs", () => {
     );
     assert.deepEqual(
       OAUTH.claude.models.map((model) => model.id),
-      ["claude-fable-5", "claude-sonnet-5", "claude-opus-4-8", "claude-opus-4-7", "claude-haiku-4-5-20251001"]
+      ["claude-fable-5-1", "claude-fable-5", "claude-sonnet-5", "claude-opus-4-8", "claude-opus-4-7", "claude-haiku-4-5-20251001"]
     );
     assert.deepEqual(
       OAUTH.antigravity.models.map((model) => model.id),

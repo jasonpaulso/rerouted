@@ -78,6 +78,7 @@ const OAUTH = {
     chatUrl: "https://api.anthropic.com/v1/messages",
     // Models available through the Claude OAuth account.
     models: [
+      { id: "claude-fable-5-1", name: "Claude Fable 5.1" },
       { id: "claude-fable-5", name: "Claude Fable 5" },
       { id: "claude-sonnet-5", name: "Claude Sonnet 5" },
       { id: "claude-opus-4-8", name: "Claude Opus 4.8" },
