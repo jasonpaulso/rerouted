@@ -2,6 +2,7 @@
 
 const path = require("node:path");
 const fs = require("node:fs");
+const { configureNetworkDefaults } = require("./lib/network");
 const {
   app,
   BrowserWindow,
@@ -15,6 +16,8 @@ const {
   screen,
   powerMonitor,
 } = require("electron");
+
+configureNetworkDefaults();
 
 const { createStore } = require("./lib/store");
 const { createRouter } = require("./lib/router");
